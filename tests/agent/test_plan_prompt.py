@@ -42,6 +42,14 @@ class TestBuildPlanPrompt:
         assert "TDD" in prompt
         assert "YAGNI" in prompt
 
+    def test_plan_is_subtraction_first_and_irreducible(self):
+        prompt = " ".join(build_plan_prompt("x").split())
+        assert "State the required outcome and what evidence would prove it" in prompt
+        assert "attempt to remove each proposed implementation item" in prompt
+        assert "restore that item" in prompt
+        assert "Apply the same removal test to verification steps" in prompt
+        assert "Do not assume every plan needs setup" in prompt
+
     def test_no_execution_handoff_in_same_turn(self):
         prompt = build_plan_prompt("x")
         assert "do not start executing in this turn" in prompt

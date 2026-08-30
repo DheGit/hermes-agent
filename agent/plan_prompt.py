@@ -53,17 +53,30 @@ Structure (include the sections that are relevant):
 - Current context / assumptions.
 - Architecture / proposed approach — 2-3 sentences.
 - Step-by-step tasks. Each task is bite-sized (2-5 minutes of focused work),
-  names exact file paths (`src/models/user.py`, not "the model file"),
-  includes complete copy-pasteable code where code is needed, and exact
-  commands with expected output for verification.
-- Tests / validation — for code tasks, follow the TDD cycle per task: write
-  the failing test, run it to verify failure, implement minimally, run to
-  verify pass, commit.
+  and names exact file paths (`src/models/user.py`, not "the model file") when
+  the outcome requires file changes. Include code, commands, and expected
+  outputs only where they remove implementation guesswork or prove the outcome.
+- Tests / validation — include only the evidence needed to prove the outcome;
+  where TDD is relevant, show the failing test, minimal implementation, and
+  passing test cycle.
 - Risks, tradeoffs, and open questions.
 
 Principles: DRY, YAGNI, TDD, frequent commits. Avoid vague tasks ("add
 authentication"), incomplete code ("add validation here"), and unverifiable
 steps ("test it works" — instead: the exact command and its expected output).
+
+Before saving or presenting the plan, make it irreducible:
+1. State the required outcome and what evidence would prove it.
+2. Subtraction first: attempt to remove each proposed implementation item. If
+   its removal would make the outcome fail or become unprovable, restore that
+   item; otherwise leave it out. Continue until no remaining item can be
+   removed without that consequence.
+3. Apply the same removal test to verification steps and keep only the evidence
+   needed to prove the outcome.
+
+Do not assume every plan needs setup, infrastructure, edge-case, integration,
+cleanup, documentation, complete-code, or expected-output work. Keep any of
+those only when the required outcome or its proof actually depends on it.
 
 Interaction style:
 - If the request is clear enough, write the plan directly.
