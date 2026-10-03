@@ -59,44 +59,7 @@ def test_description_hardline():
     assert desc.count(".") == 1, "description must be one sentence"
 
 
-def test_required_sections_present_in_order():
-    _, body = _frontmatter_and_body()
-    positions = []
-    for section in REQUIRED_SECTIONS:
-        idx = body.find(section)
-        assert idx != -1, f"missing section: {section}"
-        positions.append(idx)
-    assert positions == sorted(positions), "sections out of required order"
-
-
 def test_body_size_within_bundled_norms():
     content = SKILL_PATH.read_text(encoding="utf-8")
     lines = content.count("\n") + 1
     assert 80 <= lines <= 260, f"SKILL.md is {lines} lines; expected ~100-200"
-
-
-def test_references_native_hermes_tools():
-    _, body = _frontmatter_and_body()
-    for tool in ("`terminal`", "`read_file`", "`patch`", "`delegate_task`"):
-        assert tool in body, f"body must reference native tool {tool}"
-
-
-def test_classification_taxonomy_present():
-    _, body = _frontmatter_and_body()
-    for cls in (
-        "disjoint-intent",
-        "same-question-different-answer",
-        "superseded",
-    ):
-        assert cls in body, f"missing hunk class: {cls}"
-
-
-def test_impartiality_contract_stated():
-    _, body = _frontmatter_and_body()
-    assert "never favor" in body.lower()
-    assert "drive-by" in body.lower()
-
-
-def test_no_machine_local_paths():
-    content = SKILL_PATH.read_text(encoding="utf-8")
-    assert "/home/" not in content

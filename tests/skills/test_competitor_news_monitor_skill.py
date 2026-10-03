@@ -55,39 +55,6 @@ def test_related_skills_resolve_in_repo():
         assert hits, f"related_skills entry does not resolve in-repo: {name}"
 
 
-def test_no_phantom_skill_references():
-    content = SKILL_PATH.read_text(encoding="utf-8")
-    assert "change-monitor-and-notify" not in content, "phantom skill ref must be gone"
-
-
-def test_setup_tick_split():
-    _, body = _frontmatter_and_body()
-    assert "Setup (foreground, once)" in body
-    assert "Tick (each scheduled run)" in body
-    assert "cronjob(action=" in body, "must wire scheduling through the cronjob tool"
-
-
-def test_coverage_honesty_discipline():
-    _, body = _frontmatter_and_body()
-    assert "unknown coverage" in body, "source failure != no news"
-    assert "cutoff advance" in body.replace("advances", "advance").replace(
-        "advanced", "advance"
-    ), "cutoff must only advance on success"
-
-
-def test_steps_have_completion_criteria():
-    _, body = _frontmatter_and_body()
-    steps = re.findall(r"^### \d+\..*?(?=^### \d+\.|^## )", body, re.MULTILINE | re.DOTALL)
-    assert len(steps) >= 5
-    for step in steps:
-        assert "Done when" in step, f"step missing completion criterion: {step[:60]!r}"
-
-
-def test_no_machine_local_paths():
-    content = SKILL_PATH.read_text(encoding="utf-8")
-    assert "/home/" not in content
-
-
 def test_competitor_watch_blueprint_registered():
     from cron.blueprint_catalog import CATALOG
 

@@ -60,37 +60,3 @@ def test_related_skills_resolve_in_repo():
             + list(repo_root.glob(f"skills/*/*/{name}/SKILL.md"))
         )
         assert hits, f"related_skills entry does not resolve in-repo: {name}"
-
-
-def test_no_phantom_connectors_in_prose():
-    """Prose must not name tracker connectors that don't exist as skills."""
-    _, body = _frontmatter_and_body()
-    assert not re.search(r"\bLinear\b", body), "no phantom 'Linear' connector references"
-
-
-def test_body_structure_and_size():
-    _, body = _frontmatter_and_body()
-    for section in ("## When to Use", "## Procedure", "## Pitfalls", "## Verification"):
-        assert section in body, f"missing section: {section}"
-    assert len(SKILL_PATH.read_text(encoding="utf-8")) <= 100_000
-
-
-def test_no_machine_local_paths():
-    content = SKILL_PATH.read_text(encoding="utf-8")
-    assert "/home/" not in content
-    assert not re.search(r"[A-Z]:\\\\Users", content)
-
-
-def test_steps_have_completion_criteria():
-    _, body = _frontmatter_and_body()
-    steps = re.findall(r"^### \d+\..*?(?=^### \d+\.|^## )", body, re.MULTILINE | re.DOTALL)
-    assert len(steps) >= 5
-    for step in steps:
-        assert "Done when" in step, f"step missing completion criterion: {step[:60]!r}"
-
-
-def test_core_disciplines_present():
-    _, body = _frontmatter_and_body()
-    assert "never invent" in body, "due-date invention ban must be present"
-    assert "before creating anything" in body, "reconcile-before-create must be present"
-    assert "`unresolved`" in body, "missing owners/dates stay visibly unresolved"

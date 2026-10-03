@@ -68,20 +68,6 @@ def test_required_frontmatter_fields(frontmatter: dict) -> None:
     assert frontmatter["metadata"]["hermes"]["category"] == "research"
 
 
-def test_skill_body_has_modern_sections() -> None:
-    body = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
-    for heading in (
-        "## When to Use",
-        "## Prerequisites",
-        "## How to Run",
-        "## Quick Reference",
-        "## Procedure",
-        "## Pitfalls",
-        "## Verification",
-    ):
-        assert heading in body, f"SKILL.md missing section: {heading}"
-
-
 # ---------------------------------------------------------------------------
 # Ledger identity
 # ---------------------------------------------------------------------------

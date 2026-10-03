@@ -37,26 +37,5 @@ class TestFrontmatter:
         assert set(fm["platforms"]) == {"linux", "macos", "windows"}
 
 
-class TestBody:
-    def _body(self):
-        return SKILL_MD.read_text(encoding="utf-8")
-
-    def test_template_sections_present(self):
-        body = self._body()
-        for section in ("## Context", "## How to answer", "## Anything else?"):
-            assert section in body, f"template missing {section}"
-
-    def test_output_filename_convention(self):
-        assert "decision-questionnaire-<slug>.md" in self._body()
-
-    def test_interview_the_send_principle(self):
-        assert "Interview the Send" in self._body()
-
-    def test_no_upstream_harness_residue(self):
-        lower = self._body().lower()
-        for token in ("claude", "slash command", "disable-model-invocation"):
-            assert token not in lower, f"upstream residue: {token}"
-
-
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

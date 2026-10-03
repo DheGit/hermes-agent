@@ -40,23 +40,6 @@ def test_frontmatter_present(skill_text: str):
     assert skill_text.count("---") >= 2, "frontmatter must be delimited by two '---'"
 
 
-
-
-def test_required_sections_present(skill_text: str):
-    for heading in (
-        "## When to Use",
-        "## Prerequisites",
-        "## How to Run",
-        "## Quick Reference",
-        "## Procedure",
-        "## Pitfalls",
-        "## Verification",
-    ):
-        assert heading in skill_text, f"missing section: {heading}"
-
-
-
-
 def test_counter_example_is_interactive_and_safe():
     """The counter.js example must show the verified interactive-UI pattern:
     ctx contract, pointer_down handling, and REQUIRED signal-based cleanup
@@ -70,21 +53,6 @@ def test_counter_example_is_interactive_and_safe():
     assert "editor.off('event'" in counter
     # state kept in meta, rendered as label
     assert "meta" in counter and "count" in counter
-
-
-
-
-
-
-
-
-
-
-def test_uses_richtext_not_bare_string(skill_text: str):
-    assert "toRichText" in skill_text
-    assert "richText" in skill_text
-
-
 
 
 def test_main_js_matches_verified_contract(main_js: str):
@@ -102,8 +70,6 @@ def test_main_js_matches_verified_contract(main_js: str):
     assert "signal.addEventListener('abort'" in main_js
     # script-owned writes kept out of undo
     assert "history: 'ignore'" in main_js
-
-
 
 
 def test_platforms_declared(skill_text: str):

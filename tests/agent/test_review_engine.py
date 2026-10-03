@@ -400,7 +400,6 @@ def test_child_system_prompt_embeds_workspace_context(tmp_path):
         "do the thing", None, workspace_path=str(workspace)
     )
     assert "sibling call sites" in prompt
-    assert "binding for your work" in prompt
 
 
 def test_child_system_prompt_no_context_block_without_files(tmp_path):

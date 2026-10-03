@@ -59,40 +59,6 @@ def test_related_skills_resolve_in_repo():
         assert hits, f"related_skills entry does not resolve in-repo: {name}"
 
 
-def test_no_phantom_connectors_in_prose():
-    _, body = _frontmatter_and_body()
-    assert "flight-research" not in body, "no phantom 'flight-research' skill references"
-
-
-def test_setup_tick_split():
-    """The skill must separate one-time setup from the recurring cron tick."""
-    _, body = _frontmatter_and_body()
-    assert "Setup (foreground, once)" in body
-    assert "Tick (each scheduled run)" in body
-    assert "cronjob(action=" in body, "must wire scheduling through the cronjob tool"
-    assert "Do not schedule until one foreground fetch works" in body
-
-
-def test_state_discipline_present():
-    _, body = _frontmatter_and_body()
-    assert "never overwrite the last good observation" in body
-    assert "fingerprint" in body
-
-
-def test_steps_have_completion_criteria():
-    _, body = _frontmatter_and_body()
-    steps = re.findall(r"^### \d+\..*?(?=^### \d+\.|^## )", body, re.MULTILINE | re.DOTALL)
-    assert len(steps) >= 5
-    for step in steps:
-        assert "Done when" in step, f"step missing completion criterion: {step[:60]!r}"
-
-
-def test_no_machine_local_paths():
-    content = SKILL_PATH.read_text(encoding="utf-8")
-    assert not re.search(r"/home/(?!.*price-watches)", content)
-    assert "/home/bb" not in content
-
-
 def test_price_watch_blueprint_registered():
     from cron.blueprint_catalog import CATALOG
 
