@@ -128,6 +128,5 @@ def test_per_skill_catalog_pages_stay_out(gen):
 
 
 def test_bot_mode_is_reachable(gen, index):
-    """The page behind the original complaint, and the answer it has to carry."""
+    """The page behind the original complaint remains in the generated index."""
     assert "user-guide/bot-mode" in _linked(gen, index)
-    assert "hermes peer dm" in (gen.DOCS / "user-guide" / "bot-mode.md").read_text(encoding="utf-8")

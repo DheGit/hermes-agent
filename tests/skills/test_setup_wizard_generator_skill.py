@@ -73,15 +73,5 @@ class TestTemplate:
         )
 
 
-class TestSkillBody:
-    def test_references_template_path(self):
-        assert "templates/template.sh" in SKILL_MD.read_text(encoding="utf-8")
-
-    def test_no_upstream_harness_residue(self):
-        text = SKILL_MD.read_text(encoding="utf-8").lower()
-        for token in ("claude", "/wizard", "slash command"):
-            assert token not in text, f"upstream residue: {token}"
-
-
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

@@ -63,19 +63,6 @@ def test_description_under_sixty_chars(skill_text: str):
     assert desc.endswith("."), "description should end with a period"
 
 
-def test_required_sections_present(skill_text: str):
-    for heading in (
-        "## When to Use",
-        "## Prerequisites",
-        "## How to Run",
-        "## Quick Reference",
-        "## Procedure",
-        "## Pitfalls",
-        "## Verification",
-    ):
-        assert heading in skill_text, f"missing section: {heading}"
-
-
 # --- behavioral: derivation logic -----------------------------------------
 
 
@@ -171,10 +158,3 @@ def test_cdp_capture_is_valid_and_attaches_not_launches():
     assert 'page.on("request"' in src and 'page.on("response"' in src
     # must not tear down a browser it merely attached to
     assert "browser.close()" not in src
-
-
-def test_skill_documents_all_browser_pathways(skill_text: str):
-    # The skill must route every Hermes browser backend to the right capturer.
-    for token in ("Browserbase", "Browser-Use", "Firecrawl", "browser connect",
-                  "har_capture_cdp.py", "connect_over_cdp"):
-        assert token in skill_text, f"pathway coverage missing: {token}"

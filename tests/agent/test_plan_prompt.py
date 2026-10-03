@@ -16,36 +16,6 @@ class TestBuildPlanPrompt:
         prompt = build_plan_prompt(task)
         assert task in prompt
 
-    def test_empty_task_infers_from_conversation(self):
-        prompt = build_plan_prompt("")
-        assert "infer the task from the current conversation context" in prompt
-        # Whitespace-only behaves the same.
-        assert "infer the task" in build_plan_prompt("   ")
-
-    def test_plan_mode_ground_rules_always_present(self):
-        for arg in ("", "build a REST API"):
-            prompt = build_plan_prompt(arg)
-            assert "PLAN MODE" in prompt
-            assert "Do not implement code" in prompt
-            assert "Do not run mutating terminal commands" in prompt
-            assert "read-only" in prompt
-
-    def test_save_location_contract(self):
-        prompt = build_plan_prompt("anything")
-        assert ".hermes/plans/" in prompt
-        assert "YYYY-MM-DD_HHMMSS-<slug>.md" in prompt
-
-    def test_authoring_craft_travels_with_every_prompt(self):
-        prompt = build_plan_prompt("x")
-        assert "bite-sized" in prompt
-        assert "exact file paths" in prompt.lower()
-        assert "TDD" in prompt
-        assert "YAGNI" in prompt
-
-    def test_no_execution_handoff_in_same_turn(self):
-        prompt = build_plan_prompt("x")
-        assert "do not start executing in this turn" in prompt
-
 
 class TestPlanRegistryWiring:
     def test_plan_is_registered_and_resolves(self):

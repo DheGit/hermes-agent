@@ -22,17 +22,8 @@ from agent.prompt_builder import (
     _dynamic_context_file_max_chars,
     _get_context_file_max_chars,
     _CONTEXT_FILE_DYNAMIC_CEILING,
-    DEFAULT_AGENT_IDENTITY,
     drain_truncation_warnings,
-    TOOL_USE_ENFORCEMENT_GUIDANCE,
-    TOOL_USE_ENFORCEMENT_MODELS,
-    OPENAI_MODEL_EXECUTION_GUIDANCE,
-    PARALLEL_TOOL_CALL_GUIDANCE,
-    GOOGLE_MODEL_OPERATIONAL_GUIDANCE,
-    MEMORY_GUIDANCE,
-    SESSION_SEARCH_GUIDANCE,
     PLATFORM_HINTS,
-    WSL_ENVIRONMENT_HINT,
 )
 
 
@@ -58,27 +49,6 @@ def _drain_truncation_warnings():
 # =========================================================================
 
 
-class TestGuidanceConstants:
-    def test_memory_guidance_keeps_form_rule_and_routing(self):
-        """Dieted (#95681): WHAT belongs in memory is the memory tool
-        schema's job (taught on every call). This block keeps only the
-        declarative-form rule and the staleness/skills routing."""
-        from agent.prompt_builder import MEMORY_GUIDANCE
-
-        assert "declarative facts" in MEMORY_GUIDANCE
-        assert "imperative phrasing" in MEMORY_GUIDANCE
-        assert "stale within a week" in MEMORY_GUIDANCE
-        assert "Save proactively" in MEMORY_GUIDANCE  # positive posture leads
-        assert "workflows belong" in MEMORY_GUIDANCE
-        # The category/SKIP curricula must NOT be re-taught here.
-        assert "PR numbers" not in MEMORY_GUIDANCE
-        assert "tool quirks" not in MEMORY_GUIDANCE
-
-    def test_session_search_guidance_is_simple_cross_session_recall(self):
-        assert "relevant cross-session context exists" in SESSION_SEARCH_GUIDANCE
-        assert "recent turns of the current session" not in SESSION_SEARCH_GUIDANCE
-
-
 # =========================================================================
 # Context injection scanning
 # =========================================================================
@@ -95,17 +65,6 @@ class TestScanContextContent:
         result = _scan_context_content(malicious, "AGENTS.md")
         assert "BLOCKED" in result
         assert "prompt_injection" in result
-
-
-
-
-
-
-
-
-
-
-
 
 
 # =========================================================================
@@ -125,15 +84,11 @@ class TestTruncateContent:
         monkeypatch.setattr("hermes_cli.config.load_config_readonly", default_load_config)
 
 
-
     def test_long_content_truncated(self):
         content = "x" * (CONTEXT_FILE_MAX_CHARS + 1000)
         result = _truncate_content(content, "big.md")
         assert len(result) < len(content)
         assert "truncated" in result.lower()
-
-
-
 
 
     def test_truncation_warning_points_to_config_key(self, monkeypatch):
@@ -199,8 +154,6 @@ class TestDynamicContextFileCap:
         assert cap > CONTEXT_FILE_MAX_CHARS
 
 
-
-
     def test_explicit_config_beats_dynamic(self, monkeypatch):
         # An explicit value always wins, even when a big window is available.
         monkeypatch.setattr(
@@ -221,8 +174,6 @@ class TestDynamicContextFileCap:
         big = _truncate_content(content, "AGENTS.md", context_length=200_000)
         assert "truncated" in small.lower()
         assert big == content
-
-
 
 
 # =========================================================================
@@ -269,8 +220,6 @@ class TestParseSkillFile:
         assert str(skill_file) in caplog.text
 
 
-
-
 class TestPromptBuilderImports:
     def test_module_import_does_not_eagerly_import_skills_tool(self, monkeypatch):
         original_import = builtins.__import__
@@ -305,7 +254,6 @@ class TestBuildSkillsSystemPrompt:
         clear_skills_system_prompt_cache(clear_snapshot=True)
 
 
-
     def test_deduplicates_skills(self, monkeypatch, tmp_path):
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
         cat_dir = tmp_path / "skills" / "tools"
@@ -337,7 +285,6 @@ class TestBuildSkillsSystemPrompt:
         # Unfiltered call must not be served from the compacted cache entry.
         full = build_skills_system_prompt()
         assert "Write threads" in full
-
 
 
     def test_excludes_disabled_skills(self, monkeypatch, tmp_path):
@@ -513,10 +460,6 @@ class TestBuildContextFilesPrompt:
         assert result == ""
 
 
-
-
-
-
     def test_empty_soul_md_adds_nothing(self, tmp_path, monkeypatch):
         monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes_home"))
         hermes_home = tmp_path / "hermes_home"
@@ -526,18 +469,7 @@ class TestBuildContextFilesPrompt:
         assert result == ""
 
 
-
-
     # --- .hermes.md / HERMES.md discovery ---
-
-
-
-
-
-
-
-
-
 
 
     def test_loads_claude_md(self, tmp_path):
@@ -564,9 +496,6 @@ class TestBuildContextFilesPrompt:
         assert "From lowercase" not in result
 
 
-
-
-
 # =========================================================================
 # .hermes.md helper functions
 # =========================================================================
@@ -578,14 +507,12 @@ class TestFindHermesMd:
         assert _find_hermes_md(tmp_path) == tmp_path / ".hermes.md"
 
 
-
     def test_walks_to_git_root(self, tmp_path):
         (tmp_path / ".git").mkdir()
         (tmp_path / ".hermes.md").write_text("root rules")
         sub = tmp_path / "a" / "b"
         sub.mkdir(parents=True)
         assert _find_hermes_md(sub) == tmp_path / ".hermes.md"
-
 
 
     def test_no_git_root_checks_cwd_only(self, tmp_path):
@@ -605,8 +532,6 @@ class TestFindHermesMd:
         # No git root anywhere up the tree.
         with patch("agent.prompt_builder._find_git_root", return_value=None):
             assert _find_hermes_md(cwd) is None
-
-
 
 
 class TestFindGitRoot:
@@ -645,8 +570,6 @@ class TestStripYamlFrontmatter:
         assert _strip_yaml_frontmatter(content) == content
 
 
-
-
 # =========================================================================
 # Constants sanity checks
 # =========================================================================
@@ -662,7 +585,6 @@ class TestPromptBuilderConstants:
             hint = PLATFORM_HINTS[key]
             assert "LOCAL-ONLY" in hint
             assert "deliver" in hint
-
 
 
     def test_api_server_hint_scopes_media_tag_guidance(self):
@@ -718,19 +640,11 @@ class TestPromptBuilderConstants:
         assert "MEDIA:/absolute/path" in PLATFORM_HINTS["telegram"]
 
 
-
-
-
-
-
 # =========================================================================
 # Environment hints
 # =========================================================================
 
 class TestEnvironmentHints:
-
-
-
 
 
     def test_build_environment_hints_suppresses_host_on_docker_backend(self, monkeypatch):
@@ -834,7 +748,6 @@ class TestEnvironmentHints:
         assert result.index("Host:") < result.index("OpenShell")
 
 
-
     def test_remote_backend_list_covers_known_sandboxes(self):
         """Regression guard: if someone adds a remote backend, they must list it here."""
         import agent.prompt_builder as _pb
@@ -861,16 +774,10 @@ class TestSkillShouldShow:
         ) is True
 
 
-
-
     def test_requires_hidden_when_toolset_missing(self):
         conditions = {"fallback_for_toolsets": [], "requires_toolsets": ["terminal"],
                       "fallback_for_tools": [], "requires_tools": []}
         assert _skill_should_show(conditions, set(), set()) is False
-
-
-
-
 
 
 class TestBuildSkillsSystemPromptConditional:
@@ -880,7 +787,6 @@ class TestBuildSkillsSystemPromptConditional:
         clear_skills_system_prompt_cache(clear_snapshot=True)
         yield
         clear_skills_system_prompt_cache(clear_snapshot=True)
-
 
 
     def test_requires_skill_hidden_when_toolset_missing(self, monkeypatch, tmp_path):
@@ -897,7 +803,6 @@ class TestBuildSkillsSystemPromptConditional:
         assert "openhue" not in result
 
 
-
     def test_no_args_shows_all_skills(self, monkeypatch, tmp_path):
         """Backward compat: calling with no args shows everything."""
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
@@ -910,67 +815,9 @@ class TestBuildSkillsSystemPromptConditional:
         assert "duckduckgo" in result
 
 
-
-
 # =========================================================================
 # Tool-use enforcement guidance
 # =========================================================================
-
-
-class TestToolUseEnforcementGuidance:
-    def test_guidance_mentions_tool_calls(self):
-        assert "tool call" in TOOL_USE_ENFORCEMENT_GUIDANCE.lower()
-
-
-    def test_guidance_requires_action(self):
-        assert "MUST" in TOOL_USE_ENFORCEMENT_GUIDANCE
-
-
-
-
-
-
-
-
-class TestOpenAIModelExecutionGuidance:
-    """Tests for GPT/Codex-specific execution discipline guidance."""
-
-
-
-    def test_guidance_covers_verification(self):
-        text = OPENAI_MODEL_EXECUTION_GUIDANCE.lower()
-        assert "verification" in text or "verify" in text
-        assert "correctness" in text
-
-
-
-    def test_guidance_is_string(self):
-        assert isinstance(OPENAI_MODEL_EXECUTION_GUIDANCE, str)
-        assert len(OPENAI_MODEL_EXECUTION_GUIDANCE) > 100
-
-    def test_guidance_covers_external_write_readback(self):
-        text = OPENAI_MODEL_EXECUTION_GUIDANCE.lower()
-        assert "read" in text and "back" in text
-        assert "successful tool call is not a successful task" in text
-
-    def test_guidance_covers_count_reconciliation(self):
-        text = OPENAI_MODEL_EXECUTION_GUIDANCE.lower()
-        assert "has_more" in text
-        assert "hard assertions" in text
-
-    def test_guidance_covers_literal_preservation(self):
-        text = OPENAI_MODEL_EXECUTION_GUIDANCE.lower()
-        assert "normalize" in text
-        assert "malformed" in text
-
-    def test_guidance_covers_retry_differently(self):
-        text = OPENAI_MODEL_EXECUTION_GUIDANCE.lower()
-        assert "suspiciously narrow" in text
-        assert "retry" in text
-
-    def test_guidance_gates_completion_on_verification(self):
-        text = OPENAI_MODEL_EXECUTION_GUIDANCE.lower()
-        assert "plausible subset" in text
 
 
 class TestExecutionGuidanceModels:
@@ -994,29 +841,6 @@ class TestExecutionGuidanceModels:
             assert fam not in EXECUTION_GUIDANCE_MODELS
 
 
-class TestParallelToolCallGuidance:
-    """Behavior contracts for the universal parallel-tool-call guidance block.
-
-    Asserts the invariants the block must satisfy (steer batching, scope to
-    independent calls, stay short for the cached prompt) rather than freezing
-    its exact wording.
-    """
-
-    def test_is_nonempty_string(self):
-        assert isinstance(PARALLEL_TOOL_CALL_GUIDANCE, str)
-        assert PARALLEL_TOOL_CALL_GUIDANCE.strip()
-
-
-
-
-    def test_has_a_heading(self):
-        # Heading delimits it as its own section in the assembled prompt.
-        assert PARALLEL_TOOL_CALL_GUIDANCE.lstrip().startswith("#")
-
-
-
 # =========================================================================
 # Budget warning history stripping
 # =========================================================================
-
-

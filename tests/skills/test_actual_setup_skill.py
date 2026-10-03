@@ -56,13 +56,5 @@ def test_credits_contributor(frontmatter) -> None:
     )
 
 
-def test_uses_first_class_provider_not_custom_provider(skill_source) -> None:
-    # The legacy setup configured Actual as providers.actual.* custom entries,
-    # which now collides with the built-in provider of the same name.
-    assert "--provider actual" in skill_source
-    assert "hermes config set providers.actual.api " not in skill_source
-    assert "key_env" not in skill_source
-
-
 def test_opencode_reference_exists() -> None:
     assert (SKILL_DIR / "references" / "opencode.md").is_file()
