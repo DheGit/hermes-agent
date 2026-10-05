@@ -81,6 +81,7 @@ def _task_to_dict(t: kb.Task) -> dict[str, Any]:
         "session_id": t.session_id,
         "workflow_template_id": t.workflow_template_id,
         "current_step_key": t.current_step_key,
+        "block_kind": t.block_kind,
     }
 
 
@@ -690,6 +691,13 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
         "--reason",
         default=None,
         help="Optional reason/note — recorded as a comment before unblocking. Quote multi-word reasons.",
+    )
+    p_unblock.add_argument("--expected-event-id", type=int, default=None)
+    p_unblock.add_argument("--continuation-id", default=None)
+    p_unblock.add_argument(
+        "--expected-block-kind",
+        choices=["needs_input", "capability", "transient"],
+        default=None,
     )
     p_unblock.add_argument("task_ids", nargs="+")
 
@@ -1816,11 +1824,12 @@ def _cmd_show(args: argparse.Namespace) -> int:
             "parents": parents,
             "children": children,
             "comments": [
-                {"author": c.author, "body": c.body, "created_at": c.created_at}
+                {"id": c.id, "author": c.author, "body": c.body, "created_at": c.created_at}
                 for c in comments
             ],
             "events": [
                 {
+                    "id": e.id,
                     "kind": e.kind,
                     "payload": e.payload,
                     "created_at": e.created_at,
@@ -2501,13 +2510,43 @@ def _cmd_unblock(args: argparse.Namespace) -> int:
     reason = getattr(args, "reason", None)
     if reason is not None:
         reason = reason.strip() or None
+    guard_values = (
+        getattr(args, "expected_event_id", None),
+        getattr(args, "continuation_id", None),
+        getattr(args, "expected_block_kind", None),
+    )
+    guarded = any(value is not None for value in guard_values)
+    if guarded and (
+        not all(value is not None for value in guard_values)
+        or reason is None
+        or len(ids) != 1
+    ):
+        print(
+            "guarded unblock requires exactly one task plus --expected-event-id, "
+            "--continuation-id, --expected-block-kind, and --reason",
+            file=sys.stderr,
+        )
+        return 2
     author = _profile_author() if reason else None
     failed: list[str] = []
     with kb.connect_closing() as conn:
         for tid in ids:
-            if reason:
+            if reason and not guarded:
                 kb.add_comment(conn, tid, author, f"UNBLOCK: {reason}")
-            if not kb.unblock_task(conn, tid):
+            if not kb.unblock_task(
+                conn,
+                tid,
+                **(
+                    {
+                        "expected_event_id": args.expected_event_id,
+                        "continuation_id": args.continuation_id,
+                        "continuation_note": reason,
+                        "expected_block_kind": args.expected_block_kind,
+                    }
+                    if guarded
+                    else {}
+                ),
+            ):
                 failed.append(tid)
                 print(f"cannot unblock {tid} (not blocked/scheduled?)", file=sys.stderr)
             else:

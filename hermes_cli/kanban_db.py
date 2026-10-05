@@ -6898,7 +6898,15 @@ def _landing_status_after_parents(conn: sqlite3.Connection, task_id: str) -> str
     return "todo" if undone_parents else "ready"
 
 
-def unblock_task(conn: sqlite3.Connection, task_id: str) -> bool:
+def unblock_task(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    expected_event_id: Optional[int] = None,
+    continuation_id: Optional[str] = None,
+    continuation_note: Optional[str] = None,
+    expected_block_kind: Optional[str] = None,
+) -> bool:
     """Transition ``blocked``/``scheduled`` to its safe resumable phase.
 
     Defensively closes any stale ``current_run_id`` pointer before flipping
@@ -6908,17 +6916,91 @@ def unblock_task(conn: sqlite3.Connection, task_id: str) -> bool:
     runs invariant (``current_run_id IS NULL`` ⇔ run row in terminal
     state) holds for the rest of this function's lifetime.
     """
+    guard_values = (
+        expected_event_id,
+        continuation_id,
+        continuation_note,
+        expected_block_kind,
+    )
+    guarded = any(value is not None for value in guard_values)
+    if guarded and not all(value is not None for value in guard_values):
+        raise ValueError(
+            "guarded unblock requires expected_event_id, continuation_id, "
+            "continuation_note, and expected_block_kind"
+        )
+    if guarded:
+        if not str(continuation_id).strip() or not str(continuation_note).strip():
+            raise ValueError("continuation_id and continuation_note are required")
+        if expected_block_kind not in {"needs_input", "capability", "transient"}:
+            raise ValueError(
+                "expected_block_kind must be needs_input, capability, or transient"
+            )
+        if isinstance(expected_event_id, bool):
+            raise ValueError("expected_event_id must be a positive integer")
+        try:
+            expected_event_id = int(expected_event_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("expected_event_id must be an integer") from exc
+        if expected_event_id <= 0:
+            raise ValueError("expected_event_id must be a positive integer")
     now = int(time.time())
     with write_txn(conn):
         current = conn.execute(
-            "SELECT status FROM tasks WHERE id = ?",
+            "SELECT status, block_kind FROM tasks WHERE id = ?",
             (task_id,),
         ).fetchone()
+        if guarded:
+            if (
+                current is None
+                or current["status"] != "blocked"
+                or current["status"] == "archived"
+                or current["block_kind"] != expected_block_kind
+            ):
+                return False
+            latest_event = conn.execute(
+                "SELECT id, kind, payload FROM task_events WHERE task_id = ? "
+                "ORDER BY id DESC LIMIT 1",
+                (task_id,),
+            ).fetchone()
+            if (
+                latest_event is None
+                or latest_event["id"] != expected_event_id
+                or latest_event["kind"] != "blocked"
+            ):
+                return False
+            blocked_event = conn.execute(
+                "SELECT payload FROM task_events WHERE task_id = ? "
+                "AND kind = 'blocked' ORDER BY id DESC LIMIT 1",
+                (task_id,),
+            ).fetchone()
+            try:
+                blocked_payload = json.loads(
+                    blocked_event["payload"] if blocked_event else "{}"
+                )
+            except (json.JSONDecodeError, TypeError):
+                return False
+            if not isinstance(blocked_payload, dict) or blocked_payload.get(
+                "source_status"
+            ) not in {"ready", "running"}:
+                return False
+            for row in conn.execute(
+                "SELECT payload FROM task_events "
+                "WHERE task_id = ? AND kind = 'unblocked'",
+                (task_id,),
+            ):
+                try:
+                    payload = json.loads(row["payload"] or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    return False
+                if isinstance(payload, dict) and payload.get("continuation_id") == continuation_id:
+                    return False
         resume_status = (
             _resume_status_from_events(conn, task_id)
             if current and current["status"] == "blocked"
             else "ready"
         )
+        if guarded and resume_status != "ready":
+            return False
         _reclaim_dangling_run(
             conn, task_id, statuses=("blocked", "scheduled"), now=now,
             note="invariant recovery on unblock",
@@ -6948,12 +7030,23 @@ def unblock_task(conn: sqlite3.Connection, task_id: str) -> bool:
         )
         if cur.rowcount != 1:
             return False
+        if guarded:
+            body = f"UNBLOCK: {str(continuation_note).strip()}"
+            add_comment(conn, task_id, "scheduler", body)
         _append_event(
             conn, task_id, "unblocked",
             (
-                {"status": new_status, "resume_status": resume_status}
-                if new_status != "ready" or resume_status != "ready"
-                else None
+                {
+                    "status": new_status,
+                    "resume_status": resume_status,
+                    "continuation_id": continuation_id,
+                }
+                if guarded
+                else (
+                    {"status": new_status, "resume_status": resume_status}
+                    if new_status != "ready" or resume_status != "ready"
+                    else None
+                )
             ),
         )
         return True
