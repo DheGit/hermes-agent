@@ -585,6 +585,13 @@ youtube-transcript-api = false
 # ``py-modules`` list here drifted from the tree each time the layout changed,
 # and the drift broke installed wheels. Do not add the list back.
 
+[tool.setuptools.package-dir]
+# Declaring the project-root layout explicitly selects setuptools' lenient
+# editable strategy: a .pth entry for this directory. Without it setuptools
+# emits a finder containing only root modules present at install time, so new
+# facade/sibling modules remain unimportable until the editable is reinstalled.
+"" = "."
+
 [tool.setuptools.packages.find]
 include = ["agent", "agent.*", "tools", "tools.*", "hermes_cli", "hermes_cli.*", "gateway", "gateway.*", "tui_gateway", "tui_gateway.*", "cron", "cron.*", "acp_adapter", "plugins", "plugins.*", "providers", "providers.*"]
 

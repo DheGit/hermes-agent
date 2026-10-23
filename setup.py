@@ -81,9 +81,11 @@ except ImportError:
 # wheels with ``ModuleNotFoundError``), so there is no list to maintain here.
 # ``setup()`` kwargs merge with ``pyproject.toml``, and this file is the only
 # legitimate wheel/sdist builder, so the derived value is the single source.
-# Editable installs do not read it: ``build_editable`` never runs
-# ``bdist_wheel``. The filter source (``nix/lib.nix`` ``pythonSrc``) keeps
-# every root ``.py`` file, so the build sandbox sees the same set of files.
+# Editable builds also use this list for their initial module set. The explicit
+# root ``package-dir`` in pyproject keeps setuptools in lenient ``.pth`` mode,
+# so root modules added later are visible without reinstalling. The filter
+# source (``nix/lib.nix`` ``pythonSrc``) keeps every root ``.py`` file, so the
+# build sandbox sees the same set of files.
 def _root_py_modules():
     try:
         names = os.listdir(_ROOT)

@@ -12,8 +12,12 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import os
+import shutil
+import subprocess
 import sys
 import tomllib
+import venv
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -73,3 +77,62 @@ def test_every_root_module_imported_by_packaged_code_is_shipped():
     missing = {f: v for f, v in missing.items() if v}
     assert not missing, f"packaged code imports root modules the wheel would not ship: {missing}"
     assert "hermes_state" in shipped and "setup" not in shipped
+
+
+def test_editable_install_discovers_root_modules_added_after_install(tmp_path):
+    """Lenient editables must expose newly added root modules without reinstalling.
+
+    Hermes grows root facade/sibling modules between editable reinstalls. Package
+    directories already discover new children dynamically; root ``py_modules`` must
+    provide the same setuptools lenient-mode contract.
+    """
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    for name in ("setup.py", "pyproject.toml", "README.md", "LICENSE"):
+        shutil.copy2(REPO_ROOT / name, candidate / name)
+    required_modules = ("registration_lifecycle", "hermes_state_ids")
+    for name in required_modules:
+        shutil.copy2(REPO_ROOT / f"{name}.py", candidate / f"{name}.py")
+
+    wheel_dir = tmp_path / "wheel"
+    wheel_dir.mkdir()
+    build = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            "from setuptools.build_meta import build_editable; "
+            f"build_editable({str(wheel_dir)!r})",
+        ],
+        cwd=candidate,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert build.returncode == 0, build.stderr
+    wheels = list(wheel_dir.glob("*.whl"))
+    assert len(wheels) == 1
+
+    virtualenv = tmp_path / "venv"
+    venv.EnvBuilder(with_pip=True).create(virtualenv)
+    python = virtualenv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    install = subprocess.run(
+        [str(python), "-I", "-m", "pip", "install", "--no-deps", str(wheels[0])],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert install.returncode == 0, install.stderr
+
+    added_module = "editable_added_after_install"
+    (candidate / f"{added_module}.py").write_text("VALUE = 1\n", encoding="utf-8")
+    imports = "; ".join(f"import {name}" for name in (*required_modules, added_module))
+    probe = subprocess.run(
+        [str(python), "-I", "-c", imports],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert probe.returncode == 0, probe.stderr
