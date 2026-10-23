@@ -591,6 +591,8 @@ Visually the target is the familiar Linear / Fusion layout: dark theme, column h
 
 ### Auto vs Manual orchestration
 
+The native decomposer receives the complete task body, up to 65,536 UTF-8 bytes. Larger bodies are rejected before a model call or task mutation, with the actual and allowed byte counts in the reason. This resource limit is not a model-context guarantee: a configured provider can still reject a smaller request. Neither case truncates the body or creates children.
+
 The kanban board has two ways to handle a task you drop into the Triage column:
 
 **Auto (default)** — `kanban.auto_decompose: true`. The gateway-embedded dispatcher runs the **decomposer** on each tick, capped by `kanban.auto_decompose_per_tick` (default 3 tasks per tick) so a bulk-load of triage tasks doesn't burst-spend the auxiliary LLM. The decomposer uses the built-in decomposition prompt plus the `auxiliary.kanban_decomposer` model path, reads your installed profiles + their descriptions, and asks the LLM to produce a JSON task graph: which tasks to spawn, who they go to, and which depend on which. The original triage task becomes the parent of every leaf in the graph, so it stays alive until the whole graph completes - and then promotes back to `ready` so its assignee (`kanban.orchestrator_profile`, or the active default profile when unset) can judge completion and add more tasks if the work isn't done. This is the "drop a one-liner, walk away" flow.

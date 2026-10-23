@@ -290,6 +290,14 @@ def decompose_task(
             task_id, False, f"task is not in triage (status={task.status!r})"
         )
 
+    body_bytes = len((task.body or "").encode("utf-8"))
+    body_limit = 64 * 1024
+    if body_bytes > body_limit:
+        return DecomposeOutcome(
+            task_id, False,
+            f"task body is {body_bytes} UTF-8 bytes; decomposition limit is {body_limit} bytes",
+        )
+
     cfg = _load_config()
     orchestrator = _resolve_orchestrator_profile(cfg)
     default_assignee = _resolve_default_assignee(cfg)
@@ -306,7 +314,7 @@ def decompose_task(
     user_msg = _USER_TEMPLATE.format(
         task_id=task.id,
         title=_truncate(task.title or "", 400),
-        body=_truncate(task.body or "(no body)", 4000),
+        body=task.body or "(no body)",
         roster=_format_roster(roster),
         default_assignee=default_assignee,
     )

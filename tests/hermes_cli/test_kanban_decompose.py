@@ -8,6 +8,7 @@ and the assignee-fallback logic.
 from __future__ import annotations
 
 import json as jsonlib
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -161,3 +162,71 @@ def test_decompose_returns_false_when_task_not_triage(kanban_home):
     assert "not in triage" in outcome.reason
 
 
+def test_complete_long_body_reaches_auxiliary_request(kanban_home):
+    body = jsonlib.dumps({
+        "steps": [{"description": "implementation details " * 300}],
+        "constraints": {"storage": ["integer cents only", "reject duplicate IDs"]},
+        "verification": {"commands": ["run the complete acceptance suite"], "required": True},
+    })
+    assert len(body) > 4000
+    with kb.connect() as conn:
+        task_id = kb.create_task(conn, title="Implement approved plan", body=body, triage=True)
+    with ExitStack() as stack:
+        for profile_patch in _patch_list_profiles(["default"]):
+            stack.enter_context(profile_patch)
+        auxiliary = stack.enter_context(_patch_aux_client(jsonlib.dumps({"fanout": False, "body": body})))
+        outcome = decomp.decompose_task(task_id)
+    assert outcome.ok
+    auxiliary.assert_called_once()
+    messages = auxiliary.call_args.kwargs["messages"]
+    assert body in messages[1]["content"]
+    assert auxiliary.call_args.kwargs.get("tools") is None
+    with kb.connect() as conn:
+        assert kb.get_task(conn, task_id).body == body
+
+
+def test_context_rejection_leaves_long_task_unmodified(kanban_home):
+    body = "complete approved requirements " * 300
+    with kb.connect() as conn:
+        task_id = kb.create_task(conn, title="Approved task", body=body, triage=True)
+    with ExitStack() as stack:
+        for profile_patch in _patch_list_profiles(["default"]):
+            stack.enter_context(profile_patch)
+        auxiliary = stack.enter_context(patch("agent.auxiliary_client.call_llm",
+                                               side_effect=ValueError("maximum context length exceeded")))
+        outcome = decomp.decompose_task(task_id)
+    assert not outcome.ok
+    assert outcome.reason == "LLM error: ValueError"
+    assert body in auxiliary.call_args.kwargs["messages"][1]["content"]
+    with kb.connect() as conn:
+        task = kb.get_task(conn, task_id)
+        assert task.status == "triage"
+        assert task.title == "Approved task"
+        assert task.body == body
+        assert conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("extra_bytes", [0, 1])
+def test_body_utf8_byte_limit_is_complete_or_rejected(kanban_home, extra_bytes):
+    body = "é" * 32768 + "x" * extra_bytes
+    with kb.connect() as conn:
+        task_id = kb.create_task(conn, title="Bounded task", body=body, triage=True)
+    with ExitStack() as stack:
+        for profile_patch in _patch_list_profiles(["default"]):
+            stack.enter_context(profile_patch)
+        auxiliary = stack.enter_context(_patch_aux_client(jsonlib.dumps({"fanout": False, "body": body})))
+        outcome = decomp.decompose_task(task_id)
+    if not extra_bytes:
+        assert outcome.ok
+        auxiliary.assert_called_once()
+        assert body in auxiliary.call_args.kwargs["messages"][1]["content"]
+    else:
+        assert not outcome.ok
+        assert "65537 UTF-8 bytes" in outcome.reason
+        assert "65536 bytes" in outcome.reason
+        auxiliary.assert_not_called()
+        with kb.connect() as conn:
+            task = kb.get_task(conn, task_id)
+            assert task.status == "triage"
+            assert task.body == body
+            assert conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 1
