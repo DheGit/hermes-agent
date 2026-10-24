@@ -1,7 +1,9 @@
 """ACP delivery-capability contracts."""
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import json
+import threading
 
 from acp_adapter.server import HermesACPAgent
 from acp_adapter.session import SessionState
@@ -54,10 +56,15 @@ def test_acp_parent_receives_complete_delegated_plan_inline_and_consumes_it(monk
     }
     plan_text = json.dumps(plan, separators=(",", ":"))
     fake_child = type("Child", (), {"_subagent_id": "planner"})()
+    child_started = threading.Event()
+    child_release = threading.Event()
+    review_consumed = threading.Event()
     dispatched = []
     consumed = {}
 
     def child_result(task_index, goal, child=None, parent_agent=None, **_kwargs):
+        child_started.set()
+        assert child_release.wait(timeout=5), "test never released the delegated child"
         return {
             "task_index": task_index,
             "status": "completed",
@@ -88,6 +95,7 @@ def test_acp_parent_receives_complete_delegated_plan_inline_and_consumes_it(monk
         assert consumed["plan"] == plan
         assert "inspect" in payload["html"] and "implement" in payload["html"] and "verify" in payload["html"]
         consumed["review"] = payload
+        review_consumed.set()
         return {"review_hash": "sha256:" + "2" * 64, "status": "published"}
 
     permitted = {"td_lane_store_plan": store_plan, "td_lane_publish_plan_review": publish_review}
@@ -113,15 +121,25 @@ def test_acp_parent_receives_complete_delegated_plan_inline_and_consumes_it(monk
     loop = asyncio.new_event_loop()
     reset_session_vars()
     try:
-        result = HermesACPAgent()._run_agent_turn(
-            state=state, session_id="acp-plan", user_text="plan this", user_content="plan this",
-            conn=None, loop=loop, approval_cb=None, edit_approval_requester=None,
-        )
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            turn = executor.submit(
+                HermesACPAgent()._run_agent_turn,
+                state=state, session_id="acp-plan", user_text="plan this", user_content="plan this",
+                conn=None, loop=loop, approval_cb=None, edit_approval_requester=None,
+            )
+            assert child_started.wait(timeout=5), "delegated child did not start"
+            assert not turn.done(), "ACP turn returned before delegated completion"
+            assert not dispatched
+            assert not review_consumed.is_set()
+            child_release.set()
+            result = turn.result(timeout=5)
     finally:
+        child_release.set()
         reset_session_vars()
         loop.close()
 
     assert not dispatched
+    assert review_consumed.is_set()
     assert consumed["plan"] == plan
     assert consumed["review"]["plan_version"] == 1
     assert json.loads(result["final_response"])["status"] == "published"
