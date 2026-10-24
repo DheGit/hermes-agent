@@ -737,6 +737,9 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
 
                 tokens = set_session_vars(
                     session_key=session_id, session_id=session_id, cwd=state.cwd, cron_session="",
+                    # ACP owns one request-scoped turn and has no late-completion pump.
+                    # Keep delegated results inline so the turn can consume them before ending.
+                    async_delivery=False,
                 )
                 return lambda: clear_session_vars(tokens)
 
