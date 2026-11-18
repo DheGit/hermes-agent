@@ -135,7 +135,7 @@ from agent.codex_responses_adapter import (
     _split_responses_tool_id as _codex_split_responses_tool_id,
     _summarize_user_message_for_log,
 )
-from agent.tool_guardrails import ToolGuardrailDecision, append_toolguard_guidance, toolguard_synthetic_result
+from agent.tool_guardrails import ToolGuardrailDecision, append_toolguard_guidance, controlled_halt_message, toolguard_synthetic_result
 from hermes_cli.observability.shared_metrics_harness import record_guardrail_decision, record_guardrail_warnings
 from utils import base_url_host_matches, base_url_hostname, env_float
 
@@ -1308,12 +1308,7 @@ class AIAgent(
 
     def _toolguard_controlled_halt_response(self, decision: ToolGuardrailDecision) -> str:
         # Shown to the user as the reply, so no decision codes; the code stays in result["guardrail"].
-        return (
-            f"I stopped retrying because I kept running {decision.tool_name or 'the same tool'} "
-            f"{decision.count} times without making progress. The last result above shows what "
-            "blocked it. Tell me how you'd like to proceed, or send `continue` and I'll try a "
-            "different approach."
-        )
+        return controlled_halt_message(decision)
 
     def _append_guardrail_observation(self, tool_name: str, function_args: dict, function_result: str, *,
                                       failed: bool, tool_call_id: str = "") -> str:

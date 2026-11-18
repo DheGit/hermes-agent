@@ -319,6 +319,7 @@ class TestDelegateTaskDispatch:
         payload = json.loads(out)
         assert payload.get("error")
         assert "output_schema" in payload["error"]
+        assert payload["subagent_spawns"] == 0
 
     def test_invalid_json_schema_rejected_at_dispatch(self):
         with (
@@ -344,6 +345,12 @@ class TestDelegateTaskDispatch:
         payload = json.loads(out)
         assert payload.get("error")
         assert "output_schema" in payload["error"]
+        assert payload["subagent_spawns"] == 0
+
+    def test_unknown_action_is_marked_pre_spawn(self):
+        payload = json.loads(delegate_task(action="resume", parent_agent=_make_mock_parent()))
+        assert "Unknown action" in payload["error"]
+        assert payload["subagent_spawns"] == 0
 
     def test_child_receives_contract_and_schema_attr(self):
         """The built child carries the schema attr and its context gains

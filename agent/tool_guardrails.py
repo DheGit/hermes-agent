@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from collections import deque
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Mapping
@@ -16,6 +17,7 @@ from typing import Any, Mapping
 from utils import safe_json_loads
 from agent.tool_result_classification import (
     shape_failure_error, file_mutation_result_landed, has_failure_marker, is_guardrail_refusal, is_rate_limited)
+from tools.delegate_tool_tasks import _recover_tasks_from_json_string
 
 
 IDEMPOTENT_TOOL_NAMES = frozenset({
@@ -273,8 +275,8 @@ _DECISION_MESSAGES: dict[str, str] = {
         "This looks like a runaway search loop. Work with the results you already have and give the user your answer."
     ),
     "loop_subagent_cap": (
-        "Blocked delegate_task: this turn has already spawned {count} subagents (limit {cap}). "
-        "This looks like a runaway delegation loop. Finish the work with the results you have and answer the user."
+        "Blocked delegate_task: this request would exceed this turn's new-subagent budget "
+        "({count}/{cap} already allocated). Existing child work and completed results remain available."
     ),
 }
 
@@ -332,6 +334,8 @@ class ToolCallGuardrailController:
         self._persisted_result_paths: dict[str, str] = {}
         self._turn_web_search_count = 0
         self._turn_subagent_count = 0
+        self._pending_subagent_spawns: dict[ToolCallSignature, deque[int]] = {}
+        self._subagent_cap_lock = threading.Lock()
 
     @property
     def halt_decision(self) -> ToolGuardrailDecision | None:
@@ -354,10 +358,8 @@ class ToolCallGuardrailController:
         signature = ToolCallSignature.from_call(tool_name, args)
         allow = ToolGuardrailDecision(tool_name=tool_name, signature=signature)
 
-        # Loop caps apply regardless of hard_stop_enabled (which only governs the detector).
-        cap_block = self._check_loop_cap(tool_name, args, signature)
-        if cap_block is not None or not self.config.hard_stop_enabled:
-            return cap_block or allow
+        if not self.config.hard_stop_enabled:
+            return self._check_loop_cap(tool_name, args, signature) or allow
         # A mutation since this call last failed makes the retry a new experiment.
         exact_count = 0 if self._progress_since_failure.get(signature) else self._exact_failure_counts.get(signature, 0)
         if exact_count >= self.config.exact_failure_block_after:
@@ -365,7 +367,7 @@ class ToolCallGuardrailController:
         record = self._no_progress.get(signature) if self._is_idempotent(tool_name) else None
         if record is not None and record[1] >= self.config.no_progress_block_after:
             return self._decide("block", "idempotent_no_progress_block", tool_name, record[1], signature)
-        return allow
+        return self._check_loop_cap(tool_name, args, signature) or allow
 
     def after_call(
         self, tool_name: str, args: Mapping[str, Any] | None, result: str | None,
@@ -375,6 +377,7 @@ class ToolCallGuardrailController:
         signature = ToolCallSignature.from_call(tool_name, args)
         if failed is None:
             failed, _ = classify_tool_failure(tool_name, result)
+        self._reconcile_subagent_reservation(tool_name, signature, result)
         warnings = self.config.warnings_enabled
 
         if failed:
@@ -555,17 +558,57 @@ class ToolCallGuardrailController:
         if spec is None:
             return None
         cap_field, count_attr, code = spec
-        cap, count = getattr(self.config.loop_caps, cap_field), getattr(self, count_attr)
+        cap = getattr(self.config.loop_caps, cap_field)
         increment = 1 if tool_name == "web_search" else (_subagent_spawn_count(args) if cap else 0)
+        if tool_name == "delegate_task":
+            if not increment or not cap:
+                return None
+            with self._subagent_cap_lock:
+                reserved = sum(sum(requests) for requests in self._pending_subagent_spawns.values())
+                allocated = self._turn_subagent_count + reserved
+                if allocated + increment > cap:
+                    return self._decide("block", code, tool_name, allocated, signature, cap=cap)
+                self._pending_subagent_spawns.setdefault(signature, deque()).append(increment)
+            return None
+        count = getattr(self, count_attr)
         if increment and cap and count >= cap:
             return self._decide("block", code, tool_name, count, signature, cap=cap)
         setattr(self, count_attr, count + increment)
         return None
 
+    def _reconcile_subagent_reservation(
+        self, tool_name: str, signature: ToolCallSignature, result: str | None,
+    ) -> None:
+        if tool_name != "delegate_task":
+            return
+        with self._subagent_cap_lock:
+            reservations = self._pending_subagent_spawns.get(signature)
+            if not reservations:
+                return
+            reserved = reservations.popleft()
+            if not reservations:
+                del self._pending_subagent_spawns[signature]
+            launched = _subagent_launch_count(result)
+            self._turn_subagent_count += reserved if launched is None else launched
+
 
 def toolguard_synthetic_result(decision: ToolGuardrailDecision) -> str:
     """Build a synthetic role=tool content string for a blocked tool call."""
     return json.dumps({"error": decision.message, "guardrail": decision.to_metadata()}, ensure_ascii=False)
+
+
+def controlled_halt_message(decision: ToolGuardrailDecision) -> str:
+    if decision.code == "loop_subagent_cap":
+        return (
+            "This request would exceed this turn's new-subagent budget. Existing child work and "
+            "completed results are still available; continue in a new turn to start more children."
+        )
+    return (
+        f"I stopped retrying because I kept running {decision.tool_name or 'the same tool'} "
+        f"{decision.count} times without making progress. The last result above shows what "
+        "blocked it. Tell me how you'd like to proceed, or send `continue` and I'll try a "
+        "different approach."
+    )
 
 
 def append_toolguard_guidance(result: str, decision: ToolGuardrailDecision) -> str:
@@ -650,10 +693,29 @@ def _int_at_least(value: Any, default: int, minimum: int) -> int:
 
 def _subagent_spawn_count(args: Mapping[str, Any]) -> int:
     """Subagents one delegate_task call spawns: ``len(tasks)`` for a non-empty batch, else 1; control actions 0."""
-    if str(args.get("action") or "").strip().lower() in ("list", "steer", "stop"):
+    if str(args.get("action") or "").strip().lower() in ("list", "steer", "stop", "continue"):
         return 0
     tasks = args.get("tasks")
+    if isinstance(tasks, str):
+        recovered, _ = _recover_tasks_from_json_string(tasks)
+        if recovered is not None:
+            return len(recovered) or int(bool(str(args.get("goal") or "").strip()))
     return len(tasks) if isinstance(tasks, list) and tasks else 1
+
+
+def _subagent_launch_count(result: str | None) -> int | None:
+    """Return confirmed launches, zero for an explicit pre-spawn refusal, else unknown."""
+    data = safe_json_loads(result or "")
+    if not isinstance(data, dict):
+        return None
+    if data.get("subagent_spawns") == 0:
+        return 0
+    if data.get("status") == "dispatched" and isinstance(data.get("count"), int) and data["count"] >= 0:
+        return data["count"]
+    results = data.get("results")
+    if isinstance(results, list):
+        return sum(isinstance(entry, dict) and bool(entry.get("subagent_id")) for entry in results)
+    return None
 
 
 def _sha256(value: str) -> str:

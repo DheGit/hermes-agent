@@ -1,6 +1,7 @@
 """Pure tool-call guardrail primitive tests."""
 
 import json
+import threading
 
 import pytest
 
@@ -10,6 +11,7 @@ from agent.tool_guardrails import (
     ToolCallSignature,
     canonical_tool_args,
     classify_tool_failure,
+    controlled_halt_message,
 )
 
 
@@ -270,6 +272,88 @@ def test_web_search_cap_blocks_after_limit_regardless_of_hard_stop():
     assert decision.action == "block"
     assert decision.code == "loop_web_search_cap"
     assert decision.should_halt is True
+
+
+def test_subagent_cap_counts_confirmed_launches_and_rejects_oversized_batches():
+    controller = ToolCallGuardrailController(
+        ToolCallGuardrailConfig(loop_caps=LoopCapConfig(max_subagents=3))
+    )
+    invalid = {"tasks": [{"goal": "one"}, {"goal": "two"}]}
+    assert controller.before_call("delegate_task", invalid).action == "allow"
+    controller.after_call("delegate_task", invalid, '{"error":"invalid", "subagent_spawns":0}', failed=True)
+
+    started = {"tasks": [{"goal": "one"}, {"goal": "two"}]}
+    assert controller.before_call("delegate_task", started).action == "allow"
+    controller.after_call("delegate_task", started, '{"status":"dispatched", "count":2}')
+
+    blocked = controller.before_call("delegate_task", {"tasks": [{"goal": "three"}, {"goal": "four"}]})
+    assert blocked.action == "block"
+    assert blocked.count == 2
+    assert "would exceed" in blocked.message
+    assert "runaway" not in blocked.message
+
+
+def test_subagent_cap_counts_json_string_task_batches():
+    controller = ToolCallGuardrailController(
+        ToolCallGuardrailConfig(loop_caps=LoopCapConfig(max_subagents=2))
+    )
+    batch = {"tasks": '[{"goal": "one"}, {"goal": "two"}]'}
+    assert controller.before_call("delegate_task", batch).action == "allow"
+    blocked = controller.before_call("delegate_task", {"goal": "three"})
+    assert blocked.action == "block"
+
+
+def test_subagent_cap_keeps_unknown_failures_charged_but_allows_continuation():
+    controller = ToolCallGuardrailController(
+        ToolCallGuardrailConfig(loop_caps=LoopCapConfig(max_subagents=1))
+    )
+    spawn = {"goal": "one"}
+    assert controller.before_call("delegate_task", spawn).action == "allow"
+    controller.after_call("delegate_task", spawn, '{"error":"child failed after launch"}', failed=True)
+
+    assert controller.before_call("delegate_task", {"action": "continue", "subagent_id": "child-1"}).action == "allow"
+    blocked = controller.before_call("delegate_task", {"goal": "two"})
+    assert blocked.action == "block"
+
+
+def test_subagent_cap_reservation_is_atomic_for_concurrent_calls():
+    controller = ToolCallGuardrailController(
+        ToolCallGuardrailConfig(loop_caps=LoopCapConfig(max_subagents=1))
+    )
+    barrier = threading.Barrier(2)
+    decisions = []
+
+    def reserve():
+        barrier.wait(timeout=5)
+        decisions.append(controller.before_call("delegate_task", {"goal": "one"}).action)
+
+    workers = [threading.Thread(target=reserve) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=5)
+    assert not any(worker.is_alive() for worker in workers)
+    assert sorted(decisions) == ["allow", "block"]
+
+
+def test_other_guardrail_block_does_not_leave_a_subagent_reservation():
+    controller = ToolCallGuardrailController(
+        ToolCallGuardrailConfig(hard_stop_enabled=True, exact_failure_block_after=1)
+    )
+    args = {"goal": "one"}
+    assert controller.before_call("delegate_task", args).action == "allow"
+    controller.after_call("delegate_task", args, '{"error":"invalid", "subagent_spawns":0}', failed=True)
+    assert controller.before_call("delegate_task", args).code == "repeated_exact_failure_block"
+    assert controller._pending_subagent_spawns == {}
+
+
+def test_subagent_cap_halt_message_preserves_partial_progress():
+    controller = ToolCallGuardrailController(ToolCallGuardrailConfig(loop_caps=LoopCapConfig(max_subagents=1)))
+    assert controller.before_call("delegate_task", {"goal": "one"}).action == "allow"
+    controller.after_call("delegate_task", {"goal": "one"}, '{"status":"dispatched", "count":1}')
+    response = controlled_halt_message(controller.before_call("delegate_task", {"goal": "two"}))
+    assert "Existing child work" in response
+    assert "without making progress" not in response
 
 
 

@@ -622,10 +622,10 @@ def delegate_task(
     (per-task beats top-level; capability is depth-derived). Returns JSON with one results entry per task, or a
     dispatch handle when running in the background."""
     if parent_agent is None:
-        return tool_error("delegate_task requires a parent agent context.")
+        return _pre_spawn_error("delegate_task requires a parent agent context.")
     from tools.hosted_tool_policy import host_feature_refusal
     if refusal := host_feature_refusal("delegation", "delegate_task"):  # /review reaches here outside a tool call
-        return tool_error(refusal)
+        return _pre_spawn_error(refusal)
 
     normalized_action = (action or "").strip().lower()
     if normalized_action == "continue":
@@ -634,11 +634,11 @@ def delegate_task(
     if normalized_action in _CONTROL_ACTIONS:
         return _handle_control_action(normalized_action, subagent_id, message, parent_agent)
     if normalized_action and normalized_action != "spawn":
-        return tool_error(f"Unknown action '{action}'. Use spawn (default), list, steer, stop, or continue.")
+        return _pre_spawn_error(f"Unknown action '{action}'. Use spawn (default), list, steer, stop, or continue.")
 
     # Operator kill switch (TUI / delegation.pause RPC): blocks NEW spawns only.
     if is_spawn_paused():
-        return tool_error(
+        return _pre_spawn_error(
             "Delegation spawning is paused. Clear the pause via the TUI "
             "(`p` in /agents) or the `delegation.pause` RPC before retrying."
         )
@@ -651,7 +651,7 @@ def delegate_task(
     depth = getattr(parent_agent, "_delegate_depth", 0)
     max_spawn = _get_max_spawn_depth()
     if depth >= max_spawn:
-        return tool_error(
+        return _pre_spawn_error(
             f"Delegation depth limit reached (depth={depth}, max_spawn_depth={max_spawn}). Raise "
             f"delegation.max_spawn_depth in config.yaml if deeper nesting is required (no hard ceiling, but each level "
             f"multiplies API cost)."
@@ -679,21 +679,21 @@ def delegate_task(
         # preflight failures (e.g. pinned delegation.command missing from PATH) refuse the spawn loudly (#80450).
         routes, err = _routes_for(task_list, cfg, credentials_cfg, parent_agent)
     if err:
-        return tool_error(err)
+        return _pre_spawn_error(err)
     from tools.delegate_tool_auto_resume import refuse_waiting_duplicates
     routes = refuse_waiting_duplicates(task_list, routes, parent_agent)
     # Fail closed per task: a task its backend cannot route is refused alone (its entry carries the error); the call
     # is a tool error only when no task can run.
     runnable = [r for r in routes if not r.error]
     if not runnable:
-        return tool_error(" ".join(dict.fromkeys(r.error for r in routes)))
+        return _pre_spawn_error(" ".join(dict.fromkeys(r.error for r in routes)))
     refused = [r.refused_entry(i) for i, r in enumerate(routes) if r.error]
     # Batch-level model/provider labels (transcript headers, completion block): blank when tasks took different
     # routes, so each child reports what it actually runs on.
     creds = runnable[0].creds if all(r.creds == runnable[0].creds for r in runnable) else dict.fromkeys(runnable[0].creds)
     err = _oneshot_spawn_budget(parent_agent, len(runnable))
     if err:
-        return tool_error(err)
+        return _pre_spawn_error(err)
 
     overall_start = time.monotonic()
     # Live transcripts: cache/delegation/live/<id>/task-<n>.log per task, a side channel with zero effect on message
@@ -725,7 +725,7 @@ def delegate_task(
         live_deleg_id=live_deleg_id, live_writers=live_writers, task_images=task_images,
     )
     if err:
-        return tool_error(err)
+        return _pre_spawn_error(err)
     batch = _Batch(
         task_list, children, parent_agent, creds, context, top_role, max_children,
         live_deleg_id, live_writers, live_paths, *origin, overall_start,
@@ -978,6 +978,11 @@ def adopt_session_delegation_mode(agent: Any) -> None:
 
 # --- Registry ---
 from tools.registry import registry, tool_error
+
+
+def _pre_spawn_error(message: str) -> str:
+    """Mark refusals proven to occur before any child can start."""
+    return tool_error(message, subagent_spawns=0)
 
 def _model_background_value(args: dict, parent_agent=None) -> bool:
     """Background flag for the MODEL-facing dispatch path (registry fallback). Top-level delegations always run in the
